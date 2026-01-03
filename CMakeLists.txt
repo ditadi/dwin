@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.20)
 set(CMAKE_C_COMPILER "/usr/bin/clang")
 set(CMAKE_OBJC_COMPILER "/usr/bin/clang")
 
-project(dwin C OBJC)
+project(dwin VERSION 0.1.0 LANGUAGES C OBJC)
 
 # generate compile_commands.json for clangd
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -20,22 +20,40 @@ set(CMAKE_OBJC_STANDARD 11)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0")
 set(CMAKE_OSX_SYSROOT "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
 
-# include directories
-include_directories(${CMAKE_SOURCE_DIR}/include)
+# warnings
+add_compile_options(-Wall -Wextra -Wpedantic)
 
-# source files
-set(SOURCES)
+# =============================================================================
+# Core library (pure C, no macOS deps)
+# =============================================================================
 
-# tests
+add_library(dwin_core STATIC
+    src/core/wm_state.c
+    src/core/wm_actions.c
+    src/core/wm_layout.c
+    src/core/wm_config.c
+)
+
+target_include_directories(dwin_core PUBLIC src/core)
+
+# =============================================================================
+# Main executable
+# =============================================================================
+
+add_executable(dwin main.c)
+target_link_libraries(dwin PRIVATE dwin_core)
+
+# =============================================================================
+# Tests
+# =============================================================================
+
 option(BUILD_TESTS "Build tests" OFF)
 if(BUILD_TESTS)
     enable_testing()
 
-    add_executable(test_config tests/test_config.m)
-    target_include_directories(test_config PRIVATE ${CMAKE_SOURCE_DIR}/include)
-    target_link_libraries(test_config "-framework Foundation" "-framework Carbon")
-    add_test(NAME ConfigTests COMMAND test_config)
-
+    # Core tests (pure C)
+    add_executable(test_core tests/test_core.c)
+    target_link_libraries(test_core PRIVATE dwin_core)
+    target_include_directories(test_core PRIVATE src/core)
+    add_test(NAME CoreTests COMMAND test_core)
 endif()
-
-add_executable(dwin main.c)
