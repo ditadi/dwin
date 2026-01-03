@@ -1,0 +1,26 @@
+# Build artifacts
+build/
+cmake-build-*/
+*.o
+*.a
+*.dylib
+dwin
+BufferWM
+compile_commands.json
+
+# IDE
+.idea/
+.vscode/
+.cache/
+*.xcodeproj
+*.xcworkspace
+
+# macOS
+.DS_Store
+*.dSYM/
+
+# Logs
+*.log
+
+# Personal config (users should create their own)
+.dwin

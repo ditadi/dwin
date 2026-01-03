@@ -1,0 +1,14 @@
+---
+Language: ObjC
+BasedOnStyle: LLVM
+IndentWidth: 2
+ColumnLimit: 80
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+BreakBeforeBraces: Attach
+IndentCaseLabels: false
+PointerAlignment: Right
+SpaceBeforeParens: ControlStatements

@@ -27,21 +27,18 @@ macOS doesn't have a simple, effective tiling WM like Hyprland or i3. dwin fills
 ## Build
 
 ```bash
-cd dwm-bp
-mkdir -p build && cd build
-cmake ..
-make
-```
-
-Or with the Makefile (if available):
-
-```bash
-make
+make            # Release build
+make debug      # Debug build with symbols
+make test       # Run tests
+make codesign   # Self-sign binary for accessibility permissions
+make install    # Install to /Applications
+make format     # Format source files (requires clang-format)
+make clean      # Remove build artifacts
 ```
 
 ## Configuration
 
-Create `~/.config/.dwm`:
+Create `~/.config/.dwin`:
 
 ```bash
 # Gaps
