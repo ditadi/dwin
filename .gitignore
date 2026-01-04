@@ -8,6 +8,7 @@ dwin
 BufferWM
 compile_commands.json
 
+docs
 # IDE
 .idea/
 .vscode/

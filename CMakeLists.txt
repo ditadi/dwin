@@ -37,11 +37,34 @@ add_library(dwin_core STATIC
 target_include_directories(dwin_core PUBLIC src/core)
 
 # =============================================================================
-# Main executable
+# macOS app bundle
 # =============================================================================
 
-add_executable(dwin main.c)
-target_link_libraries(dwin PRIVATE dwin_core)
+add_executable(dwin MACOSX_BUNDLE
+    src/app/main.m
+    src/platform/macos/AppDelegate.m
+    src/platform/macos/mac_status_bar.m
+)
+
+target_include_directories(dwin PRIVATE
+    src/app
+    src/platform/macos
+    src/core
+)
+
+target_link_libraries(dwin PRIVATE
+    dwin_core
+    "-framework Cocoa"
+    "-framework ApplicationServices"
+)
+
+set_target_properties(dwin PROPERTIES
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/Info.plist"
+    MACOSX_BUNDLE_BUNDLE_NAME "dwin"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "com.victor.dwin"
+    MACOSX_BUNDLE_BUNDLE_VERSION "0.1.0"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.0"
+)
 
 # =============================================================================
 # Tests
