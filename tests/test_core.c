@@ -26,7 +26,7 @@ TEST(config_init) {
   wm_config_init(&config);
   assert(config.gaps_outer.top == 12);
   assert(config.rules_count == 0);
-  assert(config.bindings_count == 0);
+  assert(config.bindings_count == 11);
 }
 
 TEST(config_add_rule) {
@@ -55,6 +55,48 @@ TEST(config_add_binding) {
   bool found = wm_config_match_binding(&config, WM_MOD_OPT, 18, &action);
   assert(found);
   assert(action.type == WM_ACTION_SWITCH_BUFFER);
+}
+
+TEST(config_default_bindings) {
+  WMConfig config;
+  wm_config_init(&config);
+
+  WMAction action;
+
+  // opt+1 = switch to buffer 0
+  bool found = wm_config_match_binding(&config, WM_MOD_OPT, 18, &action);
+  assert(found);
+  assert(action.type == WM_ACTION_SWITCH_BUFFER);
+  assert(action.target_buffer == 0);
+
+  // opt + 5 = switch to buffer 4
+  found = wm_config_match_binding(&config, WM_MOD_OPT, 23, &action);
+  assert(found);
+  assert(action.type == WM_ACTION_SWITCH_BUFFER);
+  assert(action.target_buffer == 4);
+
+  // shift+opt+1 = move app to buffer 0
+  found =
+      wm_config_match_binding(&config, WM_MOD_SHIFT | WM_MOD_OPT, 18, &action);
+  assert(found);
+  assert(action.type == WM_ACTION_MOVE_BUFFER);
+
+  // shift+opt+5 = move app to buffer 4
+  found =
+      wm_config_match_binding(&config, WM_MOD_SHIFT | WM_MOD_OPT, 23, &action);
+  assert(found);
+  assert(action.type == WM_ACTION_MOVE_BUFFER);
+  assert(action.target_buffer == 4);
+
+  // shift+opt+p = toggle passthrough mode
+  found =
+      wm_config_match_binding(&config, WM_MOD_SHIFT | WM_MOD_OPT, 35, &action);
+  assert(found);
+  assert(action.type == WM_ACTION_TOGGLE_PASSTHROUGH);
+
+  // unknown binding = no action
+  found = wm_config_match_binding(&config, WM_MOD_NONE, 0, &action);
+  assert(!found);
 }
 
 TEST(effects_init) {
@@ -104,6 +146,7 @@ int main(void) {
   RUN_TEST(config_init);
   RUN_TEST(config_add_rule);
   RUN_TEST(config_add_binding);
+  RUN_TEST(config_default_bindings);
   printf("\nEffects:\n");
   RUN_TEST(effects_init);
   RUN_TEST(effects_add);

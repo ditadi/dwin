@@ -8,6 +8,24 @@ void wm_config_init(WMConfig *config) {
   config->gaps_outer =
       (WMGap){.top = 12, .right = 12, .bottom = 12, .left = 12};
   config->gaps_inner = (WMGap){.top = 8, .right = 8, .bottom = 8, .left = 8};
+
+  /**
+   * default bindings:
+   * Opt+1-5 = switch to buffer 1-5
+   * Shift+Opt+1-5 = move app to buffer 1-5
+   * keycodes: 1=18, 2=19, 3=20, 4=21, 5=23
+   */
+  static const int keycodes[] = {18, 19, 20, 21, 23};
+  for (int i = 0; i < 5; i++) {
+    wm_config_add_binding(config, WM_MOD_OPT, keycodes[i],
+                          WM_ACTION_SWITCH_BUFFER, i, NULL);
+    wm_config_add_binding(config, WM_MOD_SHIFT | WM_MOD_OPT, keycodes[i],
+                          WM_ACTION_MOVE_BUFFER, i, NULL);
+  }
+
+  // default binding: Shift+Opt+P = toggle passthrough mode
+  wm_config_add_binding(config, WM_MOD_SHIFT | WM_MOD_OPT, 35,
+                        WM_ACTION_TOGGLE_PASSTHROUGH, 0, NULL);
 }
 
 bool wm_config_load(WMConfig *config, const char *path) {

@@ -5,13 +5,16 @@ cmake-build-*/
 *.a
 *.dylib
 dwin
-BufferWM
 compile_commands.json
 
+
 docs
+
 # IDE
 .idea/
+.cursor
 .vscode/
+.claude/
 .cache/
 *.xcodeproj
 *.xcworkspace
