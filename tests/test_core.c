@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "wm_actions.h"
 #include "wm_config.h"
@@ -19,6 +20,191 @@ TEST(state_init) {
   assert(state.active_buffer == 0);
   assert(state.is_passthrough_mode == false);
   assert(state.app_registry.app_count == 0);
+}
+
+TEST(state_register_app) {
+  WMState state;
+  wm_state_init(&state);
+
+  // register first app
+  int index = wm_state_register_app(&state, 1234, "com.apple.Terminal");
+  assert(index == 0);
+  assert(state.app_registry.app_count == 1);
+
+  // find it
+  const WMApp *app = wm_state_find_app(&state, 1234);
+  assert(app != NULL);
+  assert(app->pid == 1234);
+  assert(strcmp(app->bundle_identifier, "com.apple.Terminal") == 0);
+  assert(app->buffer_index == -1);
+  assert(app->is_managed == true);
+
+  // regist second app
+  index = wm_state_register_app(&state, 5678, "com.google.Chrome");
+  assert(index == 1);
+  assert(state.app_registry.app_count == 2);
+
+  // re-register same pid returns existing index
+  int16_t idx_dup = wm_state_register_app(&state, 1234, "com.apple.Terminal");
+  assert(idx_dup == 0);
+  assert(state.app_registry.app_count == 2); // count unchanged
+}
+
+TEST(state_unregister_app) {
+  WMState state;
+  wm_state_init(&state);
+
+  // register 3 apps
+  wm_state_register_app(&state, 1234, "com.apple.Terminal");
+  wm_state_register_app(&state, 5678, "com.google.Chrome");
+  wm_state_register_app(&state, 9012, "com.spotify.client");
+
+  // unregister middle one (tests swap with last)
+  wm_state_unregister_app(&state, 5678);
+  assert(state.app_registry.app_count == 2);
+
+  // app 5678 should be gone
+  assert(wm_state_find_app(&state, 5678) == NULL);
+
+  // app 1234 and 9012 should still be there
+  assert(wm_state_find_app(&state, 1234) != NULL);
+  assert(wm_state_find_app(&state, 9012) != NULL);
+
+  // unregister non-existent (should be no-op)
+  wm_state_unregister_app(&state, 12345);
+  assert(state.app_registry.app_count == 2);
+}
+
+TEST(state_assign_to_buffer) {
+  WMState state;
+  wm_state_init(&state);
+
+  // register 3 apps
+  wm_state_register_app(&state, 1234, "com.apple.Terminal");
+  wm_state_register_app(&state, 5678, "com.google.Chrome");
+  wm_state_register_app(&state, 9012, "com.spotify.client");
+
+  // assign to buffers
+  wm_state_assign_to_buffer(&state, 1234, 0);
+  wm_state_assign_to_buffer(&state, 5678, 0);
+  wm_state_assign_to_buffer(&state, 9012, 1);
+
+  // verify assignments
+  assert(wm_state_find_app(&state, 1234)->buffer_index == 0);
+  assert(wm_state_find_app(&state, 5678)->buffer_index == 0);
+  assert(wm_state_find_app(&state, 9012)->buffer_index == 1);
+
+  // reassign
+  wm_state_assign_to_buffer(&state, 5678, 2);
+  assert(wm_state_find_app(&state, 5678)->buffer_index == 2);
+
+  // unassign
+  wm_state_assign_to_buffer(&state, 5678, -1);
+  assert(wm_state_find_app(&state, 5678)->buffer_index == -1);
+
+  // invalid buffer index (should be no-op)
+  wm_state_assign_to_buffer(&state, 5678, 99);
+  assert(wm_state_find_app(&state, 5678)->buffer_index == -1);
+}
+
+TEST(state_get_buffer_pids) {
+  WMState state;
+  wm_state_init(&state);
+
+  // register 3 apps
+  wm_state_register_app(&state, 1234, "com.apple.Terminal");
+  wm_state_register_app(&state, 5678, "com.google.Chrome");
+  wm_state_register_app(&state, 9012, "com.spotify.client");
+
+  wm_state_assign_to_buffer(&state, 1234, 0);
+  wm_state_assign_to_buffer(&state, 5678, 0);
+  wm_state_assign_to_buffer(&state, 9012, 1);
+
+  // get pids from buffer 0
+  pid_t pids[WM_MAX_APPS];
+  int count = wm_state_get_buffer_pids(&state, 0, pids, WM_MAX_APPS);
+  assert(count == 2);
+
+  // order may vary, so check both exists
+  bool found1 = false, found2 = false;
+  for (int i = 0; i < count; i++) {
+    if (pids[i] == 1234)
+      found1 = true;
+    if (pids[i] == 5678)
+      found2 = true;
+  }
+  assert(found1 && found2);
+
+  // get buffer 1 pids
+  count = wm_state_get_buffer_pids(&state, 1, pids, WM_MAX_APPS);
+  assert(count == 1);
+  assert(pids[0] == 9012);
+
+  // get empty buffer
+  count = wm_state_get_buffer_pids(&state, 2, pids, WM_MAX_APPS);
+  assert(count == 0);
+}
+
+TEST(state_set_z_order) {
+  WMState state;
+  wm_state_init(&state);
+
+  pid_t order[] = {1234, 5678, 9012};
+  wm_state_set_z_order(&state, 0, order, 3);
+
+  assert(state.buffers[0].z_order_count == 3);
+  assert(state.buffers[0].z_order[0] == 1234);
+  assert(state.buffers[0].z_order[1] == 5678);
+  assert(state.buffers[0].z_order[2] == 9012);
+}
+
+TEST(state_set_focused) {
+  WMState state;
+  wm_state_init(&state);
+
+  // register app
+  wm_state_register_app(&state, 1234, "com.apple.Terminal");
+  wm_state_assign_to_buffer(&state, 1234, 0);
+
+  // set focused
+  wm_state_set_focused(&state, 1234);
+  assert(state.buffers[0].last_focused_pid == 1234);
+
+  // focus unregistered app (should be no-op)
+  wm_state_set_focused(&state, 5678);
+  assert(state.buffers[0].last_focused_pid == 1234);
+}
+
+TEST(state_pid_map_collision) {
+  WMState state;
+  wm_state_init(&state);
+
+  // PIDs that will collide (same has = pid % 256)
+  // 100, 356, 612 all have hash = 100
+  wm_state_register_app(&state, 100, "com.apple.Terminal");
+  wm_state_register_app(&state, 356, "com.google.Chrome");
+  wm_state_register_app(&state, 612, "com.spotify.client");
+
+  // verify all are registered
+  assert(state.app_registry.app_count == 3);
+
+  // all should be findable
+  assert(wm_state_find_app(&state, 100) != NULL);
+  assert(wm_state_find_app(&state, 356) != NULL);
+  assert(wm_state_find_app(&state, 612) != NULL);
+
+  // remove middle collision
+  wm_state_unregister_app(&state, 356);
+  assert(state.app_registry.app_count == 2);
+  assert(wm_state_find_app(&state, 356) == NULL);
+  assert(wm_state_find_app(&state, 100) != NULL);
+  assert(wm_state_find_app(&state, 612) != NULL);
+
+  // remove last collision
+  wm_state_unregister_app(&state, 612);
+
+  assert(wm_state_find_app(&state, 612) == NULL);
+  assert(wm_state_find_app(&state, 100) != NULL);
 }
 
 TEST(config_init) {
@@ -142,6 +328,13 @@ int main(void) {
   printf("Running core tests...\n");
   printf("\nState:\n");
   RUN_TEST(state_init);
+  RUN_TEST(state_register_app);
+  RUN_TEST(state_unregister_app);
+  RUN_TEST(state_assign_to_buffer);
+  RUN_TEST(state_get_buffer_pids);
+  RUN_TEST(state_set_z_order);
+  RUN_TEST(state_set_focused);
+  RUN_TEST(state_pid_map_collision);
   printf("\nConfig:\n");
   RUN_TEST(config_init);
   RUN_TEST(config_add_rule);
