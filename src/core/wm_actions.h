@@ -49,7 +49,11 @@ typedef struct {
   int16_t to_hide_count;      // number of pids to hide
   pid_t to_show[WM_MAX_APPS]; // pids to show
   int16_t to_show_count;      // number of pids to show
-  pid_t to_raise;             // pid to raise, 0 = none;
+
+  pid_t to_raise[WM_MAX_APPS]; // pids to raise
+  int16_t to_raise_count;      // number of pids to raise
+
+  int8_t capture_z_order_buffer; // buffer to capture z-order from
 
   // layout
   bool needs_layout; // layout needs to be applied
@@ -72,7 +76,18 @@ void wm_effects_add_hide(WMEffects *effects, pid_t pid);
 // add a pid to the show list
 void wm_effects_add_show(WMEffects *effects, pid_t pid);
 
+// add a pid to the raise list
+void wm_effects_add_raise(WMEffects *effects, pid_t pid);
+
 // add a frame change
 void wm_effects_add_frame(WMEffects *effects, pid_t pid, WMRect frame);
+
+// process an action and compute effects
+bool wm_action_process(struct WMState *state, const WMAction *action,
+                       WMEffects *effects);
+
+// switch to a different buffer
+bool wm_action_switch_buffer(struct WMState *state, int target_buffer,
+                             WMEffects *effects);
 
 #endif

@@ -7,7 +7,7 @@
 #include <sys/types.h>
 
 // runtime state of the dwin
-typedef struct {
+typedef struct WMState {
   WMAppRegistry app_registry;       // registry of all apps
   WMBuffer buffers[WM_MAX_BUFFERS]; // array of buffers
   int active_buffer;                // index of the active buffer

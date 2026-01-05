@@ -291,7 +291,7 @@ TEST(effects_init) {
 
   assert(effects.to_hide_count == 0);
   assert(effects.to_show_count == 0);
-  assert(effects.to_raise == 0);
+  assert(effects.to_raise_count == 0);
 }
 
 TEST(effects_add) {
@@ -304,6 +304,205 @@ TEST(effects_add) {
   assert(effects.to_hide[0] == 1234);
   assert(effects.to_show_count == 1);
   assert(effects.to_show[0] == 5678);
+}
+
+TEST(action_switch_buffer) {
+  WMState state;
+  wm_state_init(&state);
+
+  wm_state_register_app(&state, 1234, "com.apple.Terminal");
+  wm_state_register_app(&state, 5678, "com.google.Chrome");
+  wm_state_register_app(&state, 9012, "com.spotify.client");
+
+  wm_state_assign_to_buffer(&state, 1234, 0);
+  wm_state_assign_to_buffer(&state, 5678, 0);
+  wm_state_assign_to_buffer(&state, 9012, 1);
+
+  state.active_buffer = 0;
+
+  // switch to buffer 1
+  WMEffects effects;
+  bool ok = wm_action_switch_buffer(&state, 1, &effects);
+
+  assert(ok);
+  assert(state.active_buffer == 1);
+
+  // should capture z-order from buffer 0
+  assert(effects.capture_z_order_buffer == 0);
+
+  // should show app 9012
+  assert(effects.to_show_count == 1);
+  assert(effects.to_show[0] == 9012);
+
+  // should hide app 1234, 5678
+  assert(effects.to_hide_count == 2);
+
+  // should raise app 9012 (only app in buffer)
+  assert(effects.to_raise_count == 1);
+  assert(effects.to_raise[0] == 9012);
+
+  assert(effects.needs_layout);
+  assert(effects.layout_buffer == 1);
+}
+
+TEST(action_switch_buffer_same) {
+  WMState state;
+  wm_state_init(&state);
+  state.active_buffer = 0;
+
+  WMEffects effects;
+  bool ok = wm_action_switch_buffer(&state, 0, &effects);
+
+  assert(!ok); // no-op, same buffer
+}
+
+TEST(action_switch_buffer_with_z_order) {
+  WMState state;
+  wm_state_init(&state);
+
+  wm_state_register_app(&state, 1234, "com.apple.Terminal");
+  wm_state_register_app(&state, 5678, "com.google.Chrome");
+  wm_state_assign_to_buffer(&state, 1234, 1);
+  wm_state_assign_to_buffer(&state, 5678, 1);
+
+  // set z-order, 5678 on top, 1234 below
+  pid_t order[] = {5678, 1234};
+  wm_state_set_z_order(&state, 1, order, 2);
+
+  state.active_buffer = 0;
+
+  WMEffects effects;
+  wm_action_switch_buffer(&state, 1, &effects);
+
+  // should raise in reverse order, 1234 first, then 5678
+  assert(effects.to_raise_count == 2);
+  assert(effects.to_raise[0] == 1234);
+  assert(effects.to_raise[1] == 5678);
+}
+
+TEST(action_switch_buffer_empty) {
+  WMState state;
+  wm_state_init(&state);
+
+  // buffer 1 is empty
+  state.active_buffer = 0;
+
+  WMEffects effects;
+  bool ok = wm_action_switch_buffer(&state, 1, &effects);
+
+  assert(ok);
+  assert(state.active_buffer == 1);
+  assert(effects.to_raise_count == 0); // nothing to raise
+}
+
+TEST(action_process_move_buffer) {
+  WMState state;
+  wm_state_init(&state);
+
+  // app in buffer 0, another in buffer 1
+  wm_state_register_app(&state, 1234, "com.apple.Terminal");
+  wm_state_register_app(&state, 5678, "com.google.Chrome");
+  wm_state_assign_to_buffer(&state, 1234, 0);
+  wm_state_assign_to_buffer(&state, 5678, 1);
+
+  // move app from buffer 0 to buffer 1
+  WMAction action = {
+      .type = WM_ACTION_MOVE_BUFFER, .target_pid = 1234, .target_buffer = 1};
+  WMEffects effects;
+  bool ok = wm_action_process(&state, &action, &effects);
+  assert(ok);
+
+  // state checks
+  assert(state.active_buffer == 1);
+  assert(wm_state_find_app(&state, 1234)->buffer_index == 1);
+
+  // effects checks
+  assert(effects.to_show_count == 2);
+
+  // check that the moved app is raised
+  assert(effects.to_raise_count >= 1);
+
+  // the moved app should appear in the raise list
+  bool found_moved = false;
+  for (int i = 0; i < effects.to_raise_count; i++) {
+    if (effects.to_raise[i] == 1234)
+      found_moved = true;
+  }
+  assert(found_moved);
+
+  assert(effects.needs_layout);
+  assert(effects.layout_buffer == 1);
+}
+
+TEST(action_process_move_buffer_with_zorder) {
+  WMState state;
+  wm_state_init(&state);
+
+  // 2 apps in buffer 1 with z-order saved
+  wm_state_register_app(&state, 1234, "com.apple.Terminal");
+  wm_state_register_app(&state, 5678, "com.google.Chrome");
+  wm_state_assign_to_buffer(&state, 1234, 1);
+  wm_state_assign_to_buffer(&state, 5678, 1);
+
+  pid_t order[] = {5678, 1234};
+  wm_state_set_z_order(&state, 1, order, 2);
+
+  // app to move: starts in buffer 0
+  wm_state_register_app(&state, 9012, "com.spotify.client");
+  wm_state_assign_to_buffer(&state, 9012, 0);
+  state.active_buffer = 0;
+
+  // move app 9012 to buffer 1
+  WMAction action = {
+      .type = WM_ACTION_MOVE_BUFFER, .target_pid = 9012, .target_buffer = 1};
+  WMEffects effects;
+  bool ok = wm_action_process(&state, &action, &effects);
+  assert(ok);
+  assert(state.active_buffer == 1);
+
+  // moved app must be in raise list
+  bool found = false;
+  for (int i = 0; i < effects.to_raise_count; i++) {
+    if (effects.to_raise[i] == 9012) {
+      found = true;
+      break;
+    }
+  }
+  assert(found);
+
+  // moved app should be raised last
+  assert(effects.to_raise[effects.to_raise_count - 1] == 9012);
+}
+
+TEST(action_process_switch) {
+  WMState state;
+  wm_state_init(&state);
+
+  wm_state_register_app(&state, 1234, "com.apple.Terminal");
+  wm_state_assign_to_buffer(&state, 1234, 1);
+  state.active_buffer = 0;
+
+  WMAction action = {.type = WM_ACTION_SWITCH_BUFFER, .target_buffer = 1};
+  WMEffects effects;
+
+  bool ok = wm_action_process(&state, &action, &effects);
+  assert(ok);
+  assert(state.active_buffer == 1);
+}
+
+TEST(action_process_passthrough) {
+  WMState state;
+  wm_state_init(&state);
+  assert(state.is_passthrough_mode == false);
+
+  WMAction action = {.type = WM_ACTION_TOGGLE_PASSTHROUGH};
+  WMEffects effects;
+
+  wm_action_process(&state, &action, &effects);
+  assert(state.is_passthrough_mode == true);
+
+  wm_action_process(&state, &action, &effects);
+  assert(state.is_passthrough_mode == false);
 }
 
 TEST(layout_apply_gaps) {
@@ -343,6 +542,15 @@ int main(void) {
   printf("\nEffects:\n");
   RUN_TEST(effects_init);
   RUN_TEST(effects_add);
+  printf("\nActions:\n");
+  RUN_TEST(action_switch_buffer);
+  RUN_TEST(action_switch_buffer_same);
+  RUN_TEST(action_switch_buffer_with_z_order);
+  RUN_TEST(action_switch_buffer_empty);
+  RUN_TEST(action_process_move_buffer);
+  RUN_TEST(action_process_move_buffer_with_zorder);
+  RUN_TEST(action_process_switch);
+  RUN_TEST(action_process_passthrough);
   printf("\nLayout:\n");
   RUN_TEST(layout_apply_gaps);
   RUN_TEST(layout_rect_valid);
