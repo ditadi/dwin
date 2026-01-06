@@ -53,8 +53,6 @@ typedef struct {
   pid_t to_raise[WM_MAX_APPS]; // pids to raise
   int16_t to_raise_count;      // number of pids to raise
 
-  int8_t capture_z_order_buffer; // buffer to capture z-order from
-
   // layout
   bool needs_layout; // layout needs to be applied
   int layout_buffer; // buffer to layout

@@ -9,6 +9,12 @@
 #define WM_MAX_RULES 64    // max rules for auto-assignment
 #define WM_MAX_BINDINGS 64 // max global hotkey bindings
 
+#define WM_KEYCODE_RETILE 17    // keycode for retile
+#define WM_KEY_LEFT_ARROW 0x7B  // left arrow keycode
+#define WM_KEY_RIGHT_ARROW 0x7C // right arrow keycode
+#define WM_KEY_UP_ARROW 0x7E    // up arrow keycode
+#define WM_KEY_DOWN_ARROW 0x7D  // down arrow keycode
+
 // gaps - CSS style gaps
 typedef struct {
   int top;
@@ -42,7 +48,7 @@ typedef struct {
 } WMBinding;
 
 // config - global configuration (default + user overrides)
-typedef struct {
+typedef struct WMConfig {
   WMGap gaps_outer;
   WMGap gaps_inner;
 

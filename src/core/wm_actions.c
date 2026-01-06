@@ -8,7 +8,6 @@ static bool move_app_state(WMState *state, pid_t pid, int target_buffer,
 
 void wm_effects_init(WMEffects *effects) {
   memset(effects, 0, sizeof(WMEffects));
-  effects->capture_z_order_buffer = -1;
 }
 
 void wm_effects_add_hide(WMEffects *effects, pid_t pid) {
@@ -62,9 +61,6 @@ bool wm_action_switch_buffer(WMState *state, int target_buffer,
     return false;
 
   int old_buffer = state->active_buffer;
-
-  // capture z-order from old buffer to preserve window stacking order
-  effects->capture_z_order_buffer = (int8_t)old_buffer;
 
   // collect PIDs to show (all apps in new buffer)
   pid_t new_pids[WM_MAX_APPS];

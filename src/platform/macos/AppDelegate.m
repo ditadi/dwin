@@ -3,6 +3,7 @@
 #import "mac_event_tap.h"
 #import "mac_status_bar.h"
 #import "wm_actions.h"
+#import "wm_layout.h"
 #include "wm_state.h"
 #include <AppKit/AppKit.h>
 
@@ -54,6 +55,18 @@ static bool is_app_manageable(NSRunningApplication *app) {
   return true;
 }
 
+static void apply_layout_to_active_buffer(void) {
+  WMRect screen = mac_effects_get_visible_screen_rect();
+  WMFrameChange frame_changes[WM_MAX_APPS];
+  int count =
+      wm_layout_compute_dwindle(&g_state, g_state.active_buffer, &g_config,
+                                screen, frame_changes, WM_MAX_APPS);
+
+  for (int i = 0; i < count; i++) {
+    mac_effects_apply_frame(frame_changes[i].pid, frame_changes[i].frame);
+  }
+}
+
 // handle actions from the event tap
 static void handle_action(int action_type, int argument,
                           const char *bundle_identifier) {
@@ -64,6 +77,7 @@ static void handle_action(int action_type, int argument,
   switch (type) {
   case WM_ACTION_SWITCH_BUFFER: {
     mac_switch_buffer(&g_state, argument);
+    apply_layout_to_active_buffer();
     break;
   };
   case WM_ACTION_MOVE_BUFFER: {
@@ -81,8 +95,45 @@ static void handle_action(int action_type, int argument,
     // set the moved app as last_focused so it stays on top when we switch
     wm_state_set_focused(&g_state, pid);
 
-    // mac_switch_buffer sets g_is_switching_buffer internally
     mac_switch_buffer(&g_state, argument);
+    apply_layout_to_active_buffer();
+    break;
+  }
+  case WM_ACTION_SNAP_LEFT:
+  case WM_ACTION_SNAP_RIGHT:
+  case WM_ACTION_SNAP_TOP:
+  case WM_ACTION_SNAP_BOTTOM:
+  case WM_ACTION_SNAP_MAXIMIZE:
+  case WM_ACTION_SNAP_CENTER:
+  case WM_ACTION_SNAP_TOP_LEFT:
+  case WM_ACTION_SNAP_TOP_RIGHT:
+  case WM_ACTION_SNAP_BOTTOM_LEFT:
+  case WM_ACTION_SNAP_BOTTOM_RIGHT: {
+    pid_t pid = mac_effects_get_focused_pid();
+    if (pid <= 0)
+      return;
+
+    // mark as floating so dwindle ignores it
+    wm_state_set_floating(&g_state, pid, true);
+
+    // apply snap loading
+    WMRect screen = mac_effects_get_visible_screen_rect();
+    WMRect frame = wm_layout_compute_snap(type, screen, &g_config);
+    mac_effects_apply_frame(pid, frame);
+
+    // re-apply dwindle to remaining non-floating apps
+    apply_layout_to_active_buffer();
+    break;
+  }
+
+  case WM_ACTION_RETILE: {
+    pid_t pid = mac_effects_get_focused_pid();
+    if (pid <= 0)
+      return;
+
+    // return to dwindle layout
+    wm_state_set_floating(&g_state, pid, false);
+    apply_layout_to_active_buffer();
     break;
   }
 
@@ -134,6 +185,8 @@ static void register_running_apps(void) {
 
   // register running apps
   register_running_apps();
+  // apply layout to active buffer
+  apply_layout_to_active_buffer();
 
   // capture app activation from external sources
   [[[NSWorkspace sharedWorkspace] notificationCenter]
@@ -162,7 +215,16 @@ static void register_running_apps(void) {
     return;
 
   pid_t pid = application.processIdentifier;
+
+  // check if app was in active buffer and apply layout if it was
+  const WMApp *app = wm_state_find_app(&g_state, pid);
+  bool was_in_active_buffer =
+      app != NULL && app->buffer_index == g_state.active_buffer;
   wm_state_unregister_app(&g_state, pid);
+
+  if (was_in_active_buffer) {
+    apply_layout_to_active_buffer();
+  }
 }
 
 - (void)handleAppActivated:(NSNotification *)notification {
@@ -204,6 +266,7 @@ static void register_running_apps(void) {
       if (idx >= 0) {
         wm_state_assign_to_buffer(&g_state, pid, g_state.active_buffer);
         wm_state_set_focused(&g_state, pid);
+        apply_layout_to_active_buffer();
       }
     } else {
       // app might not have window yet, retry
@@ -231,6 +294,7 @@ static void register_running_apps(void) {
           if (idx >= 0) {
             wm_state_assign_to_buffer(&g_state, pid, g_state.active_buffer);
             wm_state_set_focused(&g_state, pid);
+            apply_layout_to_active_buffer();
           }
         } else if (attempt < maxAttempts) {
           [self retryRegisterApp:pid name:name attempt:attempt + 1];

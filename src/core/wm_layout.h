@@ -22,10 +22,9 @@ typedef struct {
 struct WMState;
 struct WMConfig;
 
-// compute dwindle layout for a buffer. Returns frame count.
-int wm_layout_compute_dwindle(const struct WMState *state,
-                              const struct WMConfig *config,
-                              int8_t buffer_index, WMRect screen,
+// compute dwindle layout for a buffer
+int wm_layout_compute_dwindle(const struct WMState *state, int8_t buffer_index,
+                              const struct WMConfig *config, WMRect screen,
                               WMFrameChange *out_frames, int max_frame);
 
 // compute snap frame for a single window

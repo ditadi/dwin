@@ -4,6 +4,7 @@
 
 #include "wm_actions.h"
 #include "wm_config.h"
+#include "wm_layout.h"
 #include "wm_state.h"
 
 #define TEST(name) static void test_##name(void)
@@ -162,6 +163,32 @@ TEST(state_set_focused) {
   assert(state.buffers[0].last_focused_pid == 1234);
 }
 
+TEST(state_set_floating) {
+  WMState state;
+  wm_state_init(&state);
+
+  // register app
+  wm_state_register_app(&state, 1234, "com.apple.Terminal");
+
+  // default is not floating
+  const WMApp *app = wm_state_find_app(&state, 1234);
+  assert(app->is_floating == false);
+
+  // set floating
+  wm_state_set_floating(&state, 1234, true);
+  app = wm_state_find_app(&state, 1234);
+  assert(app->is_floating == true);
+
+  // set back to tiled
+  wm_state_set_floating(&state, 1234, false);
+  app = wm_state_find_app(&state, 1234);
+  assert(app->is_floating == false);
+
+  // set floating on non-existent app (should be no-op)
+  wm_state_set_floating(&state, 9999, true);
+  // no crash = success
+}
+
 TEST(state_pid_map_collision) {
   WMState state;
   wm_state_init(&state);
@@ -199,7 +226,7 @@ TEST(config_init) {
   wm_config_init(&config);
   assert(config.gaps_outer.top == 12);
   assert(config.rules_count == 0);
-  assert(config.bindings_count == 11);
+  assert(config.bindings_count == 20); // 10 buffer + 1 passthrough + 9 snap
 }
 
 TEST(config_add_rule) {
@@ -313,9 +340,6 @@ TEST(action_switch_buffer) {
 
   assert(ok);
   assert(state.active_buffer == 1);
-
-  // should capture z-order from buffer 0
-  assert(effects.capture_z_order_buffer == 0);
 
   // should show app 9012
   assert(effects.to_show_count == 1);
@@ -467,6 +491,318 @@ TEST(layout_rect_valid) {
   assert(wm_layout_rect_valid(invalid) == false);
 }
 
+TEST(layout_snap_left) {
+  WMConfig config;
+  wm_config_init(&config);
+  config.gaps_outer = (WMGap){.top = 10, .right = 10, .bottom = 10, .left = 10};
+  config.gaps_inner = (WMGap){.top = 8, .right = 8, .bottom = 8, .left = 8};
+
+  WMRect screen = {.x = 0, .y = 0, .width = 1920, .height = 1080};
+  WMRect result = wm_layout_compute_snap(WM_ACTION_SNAP_LEFT, screen, &config);
+
+  // x = 0 + 10 = 10
+  // y = 0 + 10 = 10
+  // width = (1920 - 10 - 10 - 8) / 2 = 946
+  // height = 1080 - 10 - 10 = 1060
+  assert(result.x == 10);
+  assert(result.y == 10);
+  assert(result.width == 946);
+  assert(result.height == 1060);
+}
+
+TEST(layout_snap_right) {
+  WMConfig config;
+  wm_config_init(&config);
+  config.gaps_outer = (WMGap){.top = 10, .right = 10, .bottom = 10, .left = 10};
+  config.gaps_inner = (WMGap){.top = 8, .right = 8, .bottom = 8, .left = 8};
+
+  WMRect screen = {.x = 0, .y = 0, .width = 1920, .height = 1080};
+  WMRect result = wm_layout_compute_snap(WM_ACTION_SNAP_RIGHT, screen, &config);
+
+  // x = 10 + 946 + 8 = 964
+  assert(result.x == 964);
+  assert(result.y == 10);
+  assert(result.width == 946);
+  assert(result.height == 1060);
+}
+
+TEST(layout_snap_maximize) {
+  WMConfig config;
+  wm_config_init(&config);
+  config.gaps_outer = (WMGap){.top = 10, .right = 10, .bottom = 10, .left = 10};
+
+  WMRect screen = {.x = 0, .y = 0, .width = 1920, .height = 1080};
+  WMRect result =
+      wm_layout_compute_snap(WM_ACTION_SNAP_MAXIMIZE, screen, &config);
+
+  assert(result.x == 10);
+  assert(result.y == 10);
+  assert(result.width == 1900);
+  assert(result.height == 1060);
+}
+
+TEST(layout_snap_center) {
+  WMConfig config;
+  wm_config_init(&config);
+
+  WMRect screen = {.x = 0, .y = 0, .width = 1920, .height = 1080};
+  WMRect result =
+      wm_layout_compute_snap(WM_ACTION_SNAP_CENTER, screen, &config);
+
+  // width = 1920 * 0.6 = 1152
+  // height = 1080 * 0.7 = 756
+  // x = (1920 - 1152) / 2 = 384
+  // y = (1080 - 756) / 2 = 162
+  assert(result.width == 1152);
+  assert(result.height == 756);
+  assert(result.x == 384);
+  assert(result.y == 162);
+}
+
+TEST(layout_snap_top) {
+  WMConfig config;
+  wm_config_init(&config);
+  config.gaps_outer = (WMGap){.top = 10, .right = 10, .bottom = 10, .left = 10};
+  config.gaps_inner = (WMGap){.top = 8, .right = 8, .bottom = 8, .left = 8};
+
+  WMRect screen = {.x = 0, .y = 0, .width = 1920, .height = 1080};
+  WMRect result = wm_layout_compute_snap(WM_ACTION_SNAP_TOP, screen, &config);
+
+  // height = (1080 - 10 - 10 - 8) / 2 = 526
+  // y = 10 + 526 + 8 = 544
+  assert(result.x == 10);
+  assert(result.y == 544);
+  assert(result.width == 1900);
+  assert(result.height == 526);
+}
+
+TEST(layout_snap_bottom) {
+  WMConfig config;
+  wm_config_init(&config);
+  config.gaps_outer = (WMGap){.top = 10, .right = 10, .bottom = 10, .left = 10};
+  config.gaps_inner = (WMGap){.top = 8, .right = 8, .bottom = 8, .left = 8};
+
+  WMRect screen = {.x = 0, .y = 0, .width = 1920, .height = 1080};
+  WMRect result =
+      wm_layout_compute_snap(WM_ACTION_SNAP_BOTTOM, screen, &config);
+
+  assert(result.x == 10);
+  assert(result.y == 10);
+  assert(result.width == 1900);
+  assert(result.height == 526);
+}
+
+TEST(layout_snap_corners) {
+  WMConfig config;
+  wm_config_init(&config);
+  config.gaps_outer = (WMGap){.top = 10, .right = 10, .bottom = 10, .left = 10};
+  config.gaps_inner = (WMGap){.top = 8, .right = 8, .bottom = 8, .left = 8};
+
+  WMRect screen = {.x = 0, .y = 0, .width = 1920, .height = 1080};
+
+  // top-left
+  WMRect tl =
+      wm_layout_compute_snap(WM_ACTION_SNAP_TOP_LEFT, screen, &config);
+  assert(tl.x == 10);
+  assert(tl.y == 544);
+  assert(tl.width == 946);
+  assert(tl.height == 526);
+
+  // top-right
+  WMRect tr =
+      wm_layout_compute_snap(WM_ACTION_SNAP_TOP_RIGHT, screen, &config);
+  assert(tr.x == 964);
+  assert(tr.y == 544);
+  assert(tr.width == 946);
+  assert(tr.height == 526);
+
+  // bottom-left
+  WMRect bl =
+      wm_layout_compute_snap(WM_ACTION_SNAP_BOTTOM_LEFT, screen, &config);
+  assert(bl.x == 10);
+  assert(bl.y == 10);
+  assert(bl.width == 946);
+  assert(bl.height == 526);
+
+  // bottom-right
+  WMRect br =
+      wm_layout_compute_snap(WM_ACTION_SNAP_BOTTOM_RIGHT, screen, &config);
+  assert(br.x == 964);
+  assert(br.y == 10);
+  assert(br.width == 946);
+  assert(br.height == 526);
+}
+
+TEST(layout_dwindle_single) {
+  WMState state;
+  wm_state_init(&state);
+  WMConfig config;
+  wm_config_init(&config);
+  config.gaps_outer = (WMGap){.top = 10, .right = 10, .bottom = 10, .left = 10};
+  config.gaps_inner = (WMGap){.top = 8, .right = 8, .bottom = 8, .left = 8};
+
+  wm_state_register_app(&state, 1234, "com.test.app");
+  wm_state_assign_to_buffer(&state, 1234, 0);
+
+  WMRect screen = {.x = 0, .y = 0, .width = 1920, .height = 1080};
+  WMFrameChange frames[WM_MAX_APPS];
+  int count =
+      wm_layout_compute_dwindle(&state, 0, &config, screen, frames, WM_MAX_APPS);
+
+  assert(count == 1);
+  assert(frames[0].pid == 1234);
+  assert(frames[0].frame.x == 10);
+  assert(frames[0].frame.y == 10);
+  assert(frames[0].frame.width == 1900);
+  assert(frames[0].frame.height == 1060);
+}
+
+TEST(layout_dwindle_two) {
+  WMState state;
+  wm_state_init(&state);
+  WMConfig config;
+  wm_config_init(&config);
+  config.gaps_outer = (WMGap){.top = 10, .right = 10, .bottom = 10, .left = 10};
+  config.gaps_inner = (WMGap){.top = 8, .right = 8, .bottom = 8, .left = 8};
+
+  wm_state_register_app(&state, 1234, "com.test.app1");
+  wm_state_register_app(&state, 5678, "com.test.app2");
+  wm_state_assign_to_buffer(&state, 1234, 0);
+  wm_state_assign_to_buffer(&state, 5678, 0);
+
+  WMRect screen = {.x = 0, .y = 0, .width = 1920, .height = 1080};
+  WMFrameChange frames[WM_MAX_APPS];
+  int count =
+      wm_layout_compute_dwindle(&state, 0, &config, screen, frames, WM_MAX_APPS);
+
+  assert(count == 2);
+  // first app: left half
+  assert(frames[0].frame.x == 10);
+  assert(frames[0].frame.width == 946);
+  // second app: right half
+  assert(frames[1].frame.x == 964);
+  assert(frames[1].frame.width == 946);
+}
+
+TEST(layout_dwindle_three) {
+  WMState state;
+  wm_state_init(&state);
+  WMConfig config;
+  wm_config_init(&config);
+  config.gaps_outer = (WMGap){.top = 0, .right = 0, .bottom = 0, .left = 0};
+  config.gaps_inner = (WMGap){.top = 0, .right = 0, .bottom = 0, .left = 0};
+
+  wm_state_register_app(&state, 1, "com.test.app1");
+  wm_state_register_app(&state, 2, "com.test.app2");
+  wm_state_register_app(&state, 3, "com.test.app3");
+  wm_state_assign_to_buffer(&state, 1, 0);
+  wm_state_assign_to_buffer(&state, 2, 0);
+  wm_state_assign_to_buffer(&state, 3, 0);
+
+  WMRect screen = {.x = 0, .y = 0, .width = 1000, .height = 1000};
+  WMFrameChange frames[WM_MAX_APPS];
+  int count =
+      wm_layout_compute_dwindle(&state, 0, &config, screen, frames, WM_MAX_APPS);
+
+  assert(count == 3);
+  // app 1: left half (500x1000)
+  assert(frames[0].frame.width == 500);
+  assert(frames[0].frame.height == 1000);
+  // app 2: top-right (500x500)
+  assert(frames[1].frame.width == 500);
+  assert(frames[1].frame.height == 500);
+  // app 3: bottom-right (500x500)
+  assert(frames[2].frame.width == 500);
+  assert(frames[2].frame.height == 500);
+}
+
+TEST(layout_dwindle_empty) {
+  WMState state;
+  wm_state_init(&state);
+  WMConfig config;
+  wm_config_init(&config);
+
+  WMRect screen = {.x = 0, .y = 0, .width = 1920, .height = 1080};
+  WMFrameChange frames[WM_MAX_APPS];
+  int count =
+      wm_layout_compute_dwindle(&state, 0, &config, screen, frames, WM_MAX_APPS);
+
+  assert(count == 0);
+}
+
+TEST(layout_dwindle_floating_skipped) {
+  WMState state;
+  wm_state_init(&state);
+  WMConfig config;
+  wm_config_init(&config);
+  config.gaps_outer = (WMGap){.top = 0, .right = 0, .bottom = 0, .left = 0};
+  config.gaps_inner = (WMGap){.top = 0, .right = 0, .bottom = 0, .left = 0};
+
+  wm_state_register_app(&state, 1, "com.test.app1");
+  wm_state_register_app(&state, 2, "com.test.app2");
+  wm_state_assign_to_buffer(&state, 1, 0);
+  wm_state_assign_to_buffer(&state, 2, 0);
+
+  // make app 2 floating - it should be skipped from dwindle
+  wm_state_set_floating(&state, 2, true);
+
+  WMRect screen = {.x = 0, .y = 0, .width = 1000, .height = 1000};
+  WMFrameChange frames[WM_MAX_APPS];
+  int count =
+      wm_layout_compute_dwindle(&state, 0, &config, screen, frames, WM_MAX_APPS);
+
+  // only 1 app should be laid out (the non-floating one)
+  assert(count == 1);
+  assert(frames[0].pid == 1);
+  assert(frames[0].frame.width == 1000);
+  assert(frames[0].frame.height == 1000);
+}
+
+TEST(layout_dwindle_after_snap_retile) {
+  WMState state;
+  wm_state_init(&state);
+  WMConfig config;
+  wm_config_init(&config);
+  config.gaps_outer = (WMGap){.top = 0, .right = 0, .bottom = 0, .left = 0};
+  config.gaps_inner = (WMGap){.top = 0, .right = 0, .bottom = 0, .left = 0};
+
+  wm_state_register_app(&state, 1, "com.test.app1");
+  wm_state_register_app(&state, 2, "com.test.app2");
+  wm_state_register_app(&state, 3, "com.test.app3");
+  wm_state_assign_to_buffer(&state, 1, 0);
+  wm_state_assign_to_buffer(&state, 2, 0);
+  wm_state_assign_to_buffer(&state, 3, 0);
+
+  WMRect screen = {.x = 0, .y = 0, .width = 1000, .height = 1000};
+  WMFrameChange frames[WM_MAX_APPS];
+
+  // initially all 3 apps are tiled
+  int count =
+      wm_layout_compute_dwindle(&state, 0, &config, screen, frames, WM_MAX_APPS);
+  assert(count == 3);
+
+  // snap app 2 (makes it floating)
+  wm_state_set_floating(&state, 2, true);
+
+  // now only 2 apps should be in dwindle
+  count =
+      wm_layout_compute_dwindle(&state, 0, &config, screen, frames, WM_MAX_APPS);
+  assert(count == 2);
+  assert(frames[0].pid == 1);
+  assert(frames[1].pid == 3);
+  // with 2 apps, they split horizontally
+  assert(frames[0].frame.width == 500);
+  assert(frames[1].frame.width == 500);
+
+  // retile app 2 (returns to dwindle)
+  wm_state_set_floating(&state, 2, false);
+
+  // now all 3 apps should be in dwindle again
+  count =
+      wm_layout_compute_dwindle(&state, 0, &config, screen, frames, WM_MAX_APPS);
+  assert(count == 3);
+}
+
 int main(void) {
   printf("Running core tests...\n");
   printf("\nState:\n");
@@ -476,6 +812,7 @@ int main(void) {
   RUN_TEST(state_assign_to_buffer);
   RUN_TEST(state_get_buffer_pids);
   RUN_TEST(state_set_focused);
+  RUN_TEST(state_set_floating);
   RUN_TEST(state_pid_map_collision);
   printf("\nConfig:\n");
   RUN_TEST(config_init);
@@ -496,6 +833,19 @@ int main(void) {
   printf("\nLayout:\n");
   RUN_TEST(layout_apply_gaps);
   RUN_TEST(layout_rect_valid);
+  RUN_TEST(layout_snap_left);
+  RUN_TEST(layout_snap_right);
+  RUN_TEST(layout_snap_maximize);
+  RUN_TEST(layout_snap_center);
+  RUN_TEST(layout_snap_top);
+  RUN_TEST(layout_snap_bottom);
+  RUN_TEST(layout_snap_corners);
+  RUN_TEST(layout_dwindle_single);
+  RUN_TEST(layout_dwindle_two);
+  RUN_TEST(layout_dwindle_three);
+  RUN_TEST(layout_dwindle_empty);
+  RUN_TEST(layout_dwindle_floating_skipped);
+  RUN_TEST(layout_dwindle_after_snap_retile);
   printf("\nAll tests passed\n");
   return 0;
 }

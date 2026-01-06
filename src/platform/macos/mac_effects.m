@@ -211,6 +211,59 @@ void mac_switch_buffer(WMState *state, int new_buffer_index) {
                  });
 }
 
+WMRect mac_effects_get_visible_screen_rect(void) {
+  NSScreen *screen = [NSScreen mainScreen];
+  NSRect frame = [screen frame];
+  return (WMRect){
+      .x = frame.origin.x,
+      .y = frame.origin.y,
+      .width = frame.size.width,
+      .height = frame.size.height,
+  };
+}
+
+bool mac_effects_apply_frame(pid_t pid, WMRect frame) {
+  AXUIElementRef app = AXUIElementCreateApplication(pid);
+  if (app == NULL)
+    return false;
+
+  // get main window or first window
+  AXUIElementRef window = NULL;
+  AXError err = AXUIElementCopyAttributeValue(app, kAXMainWindowAttribute,
+                                              (CFTypeRef *)&window);
+  if (err != kAXErrorSuccess || window == NULL) {
+    // fallback to first window
+    CFArrayRef windows = NULL;
+    err = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute,
+                                        (CFTypeRef *)&windows);
+    if (err != kAXErrorSuccess || windows == NULL ||
+        CFArrayGetCount(windows) == 0) {
+      if (windows)
+        CFRelease(windows);
+      if (window)
+        CFRelease(window);
+      CFRelease(app);
+      return false;
+    }
+    window = (AXUIElementRef)CFRetain(CFArrayGetValueAtIndex(windows, 0));
+    CFRelease(windows);
+  }
+  // set position
+  CGPoint position = CGPointMake(frame.x, frame.y);
+  AXValueRef position_value = AXValueCreate(kAXValueTypeCGPoint, &position);
+  AXUIElementSetAttributeValue(window, kAXPositionAttribute, position_value);
+  CFRelease(position_value);
+
+  // set size
+  CGSize size = CGSizeMake(frame.width, frame.height);
+  AXValueRef size_value = AXValueCreate(kAXValueTypeCGSize, &size);
+  AXUIElementSetAttributeValue(window, kAXSizeAttribute, size_value);
+  CFRelease(size_value);
+  CFRelease(window);
+  CFRelease(app);
+  return true;
+}
+
 pid_t mac_effects_get_focused_pid(void) {
   NSRunningApplication *app =
       [[NSWorkspace sharedWorkspace] frontmostApplication];

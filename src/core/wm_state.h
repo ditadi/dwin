@@ -40,6 +40,9 @@ int wm_state_get_buffer_pids(const WMState *state, int buffer_index,
 // record that an app was focused in its buffer
 void wm_state_set_focused(WMState *state, pid_t pid);
 
+// set app floating state
+void wm_state_set_floating(WMState *state, pid_t pid, bool is_floating);
+
 // debug
 void wm_state_check_invariants(const WMState *state);
 

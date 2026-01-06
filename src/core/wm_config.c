@@ -26,6 +26,33 @@ void wm_config_init(WMConfig *config) {
   // default binding: Shift+Opt+P = toggle passthrough mode
   wm_config_add_binding(config, WM_MOD_SHIFT | WM_MOD_OPT, 35,
                         WM_ACTION_TOGGLE_PASSTHROUGH, 0, NULL);
+
+  // snap bindings: CMD+Arrow for halves
+  wm_config_add_binding(config, WM_MOD_CMD, WM_KEY_LEFT_ARROW,
+                        WM_ACTION_SNAP_LEFT, 0, NULL);
+  wm_config_add_binding(config, WM_MOD_CMD, WM_KEY_RIGHT_ARROW,
+                        WM_ACTION_SNAP_RIGHT, 0, NULL);
+  wm_config_add_binding(config, WM_MOD_CMD, WM_KEY_UP_ARROW, WM_ACTION_SNAP_TOP,
+                        0, NULL);
+  wm_config_add_binding(config, WM_MOD_CMD, WM_KEY_DOWN_ARROW,
+                        WM_ACTION_SNAP_BOTTOM, 0, NULL);
+  wm_config_add_binding(config, WM_MOD_CMD, WM_KEY_UP_ARROW, WM_ACTION_SNAP_TOP,
+                        0, NULL);
+
+  // snap bindings: CMD+SHIFT+Arrow for corners
+  wm_config_add_binding(config, WM_MOD_CMD | WM_MOD_SHIFT, WM_KEY_LEFT_ARROW,
+                        WM_ACTION_SNAP_TOP_LEFT, 0, NULL);
+  wm_config_add_binding(config, WM_MOD_CMD | WM_MOD_SHIFT, WM_KEY_RIGHT_ARROW,
+                        WM_ACTION_SNAP_TOP_RIGHT, 0, NULL);
+
+  wm_config_add_binding(config, WM_MOD_CMD | WM_MOD_SHIFT, WM_KEY_UP_ARROW,
+                        WM_ACTION_SNAP_MAXIMIZE, 0, NULL);
+  wm_config_add_binding(config, WM_MOD_CMD | WM_MOD_SHIFT, WM_KEY_DOWN_ARROW,
+                        WM_ACTION_SNAP_CENTER, 0, NULL);
+
+  // tile binding: CMD+SHIFT+T (keycode 17)
+  wm_config_add_binding(config, WM_MOD_CMD | WM_MOD_SHIFT, WM_KEYCODE_RETILE,
+                        WM_ACTION_RETILE, 0, NULL);
 }
 
 bool wm_config_load(WMConfig *config, const char *path) {

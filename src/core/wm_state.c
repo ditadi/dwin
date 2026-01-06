@@ -232,6 +232,16 @@ void wm_state_set_focused(WMState *state, pid_t pid) {
   state->buffers[app->buffer_index].last_focused_pid = pid;
 }
 
+void wm_state_set_floating(WMState *state, pid_t pid, bool is_floating) {
+  if (!state || pid == 0)
+    return;
+  int8_t idx = wm_state_find_app_index(state, pid);
+  if (idx < 0)
+    return;
+
+  state->app_registry.apps[idx].is_floating = is_floating;
+}
+
 void wm_state_check_invariants(const WMState *state) {
   const WMAppRegistry *registry = &state->app_registry;
 
