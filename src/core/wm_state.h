@@ -37,10 +37,6 @@ void wm_state_assign_to_buffer(WMState *state, pid_t pid, int buffer_index);
 int wm_state_get_buffer_pids(const WMState *state, int buffer_index,
                              pid_t *out_pids, int max_pids);
 
-// update z-order for a buffer. Called whenw indow order changes
-void wm_state_set_z_order(WMState *state, int buffer_index, const pid_t *pids,
-                          int count);
-
 // record that an app was focused in its buffer
 void wm_state_set_focused(WMState *state, pid_t pid);
 

@@ -34,7 +34,6 @@ static CGEventRef event_tap_callback(CGEventTapProxy proxy, CGEventType type,
   // handle tap being disabled by system
   if (type == kCGEventTapDisabledByTimeout ||
       type == kCGEventTapDisabledByUserInput) {
-    NSLog(@"[EventTap] Tap disabled by system. Re-enabling...");
     if (g_event_tap) {
       CGEventTapEnable(g_event_tap, true);
     }
@@ -61,8 +60,6 @@ static CGEventRef event_tap_callback(CGEventTapProxy proxy, CGEventType type,
   // handle passthrough toggle
   if (action.type == WM_ACTION_TOGGLE_PASSTHROUGH) {
     g_passthrough_mode = !g_passthrough_mode;
-    NSLog(@"[EventTap] Passthrough mode %s",
-          g_passthrough_mode ? "enabled" : "disabled");
     return NULL;
   }
 
@@ -86,10 +83,8 @@ static CGEventRef event_tap_callback(CGEventTapProxy proxy, CGEventType type,
 
 // start the event tap for global hotkeys
 bool mac_event_tap_start(WMConfig *config, WMActionCallback callback) {
-  if (g_event_tap) {
-    NSLog(@"[EventTap] Already running. Stopping...");
+  if (g_event_tap)
     return true;
-  }
 
   g_config = config;
   g_action_callback = callback;
@@ -100,10 +95,8 @@ bool mac_event_tap_start(WMConfig *config, WMActionCallback callback) {
   g_event_tap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap,
                                  kCGEventTapOptionDefault, event_mask,
                                  event_tap_callback, NULL);
-  if (!g_event_tap) {
-    NSLog(@"[EventTap] Failed to create event tap. Error: %d", (int)errno);
+  if (!g_event_tap)
     return false;
-  }
 
   // create run loop source and add to main run loop
   g_run_loop_source =
@@ -114,7 +107,6 @@ bool mac_event_tap_start(WMConfig *config, WMActionCallback callback) {
   // enable event tap
   CGEventTapEnable(g_event_tap, true);
 
-  NSLog(@"[EventTap] Started successfully.");
   return true;
 }
 
@@ -134,7 +126,6 @@ void mac_event_tap_stop(void) {
   }
 
   g_action_callback = NULL;
-  NSLog(@"[EventTap] Stopped successfully.");
 }
 
 // check if event tap is currently running
@@ -145,7 +136,6 @@ bool mac_event_tap_is_running(void) {
 // enable/disable passthrough mode (all keys pass through)
 void mac_event_tap_set_passthrough(bool enabled) {
   g_passthrough_mode = enabled;
-  NSLog(@"[EventTap] Passthrough mode %s", enabled ? "enabled" : "disabled");
 }
 
 // get the current passthrough mode

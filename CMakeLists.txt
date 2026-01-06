@@ -45,6 +45,7 @@ add_executable(dwin MACOSX_BUNDLE
     src/platform/macos/AppDelegate.m
     src/platform/macos/mac_status_bar.m
     src/platform/macos/mac_event_tap.m
+    src/platform/macos/mac_effects.m
 )
 
 target_include_directories(dwin PRIVATE

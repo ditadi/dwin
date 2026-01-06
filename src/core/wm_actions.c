@@ -84,23 +84,11 @@ bool wm_action_switch_buffer(WMState *state, int target_buffer,
     wm_effects_add_hide(effects, old_pids[i]);
   }
 
-  // determine apps to raise (order: saved z_order, last_focused_pid, first app)
+  // determine app to raise (use last_focused_pid or first app)
   WMBuffer *new_buf = &state->buffers[target_buffer];
 
-  if (new_buf->z_order_count > 0) {
-    // raise in reverse order
-    for (int i = new_buf->z_order_count - 1; i >= 0; i--) {
-      pid_t zpid = new_buf->z_order[i];
-      // verify PID is still in the buffer before raising
-      for (int j = 0; j < new_count; j++) {
-        if (new_pids[j] == zpid) {
-          wm_effects_add_raise(effects, zpid);
-          break;
-        }
-      }
-    }
-  } else if (new_buf->last_focused_pid > 0) {
-    // fallback use last focused app
+  if (new_buf->last_focused_pid > 0) {
+    // use last focused app
     wm_effects_add_raise(effects, new_buf->last_focused_pid);
   } else if (new_count > 0) {
     // fallback use first app

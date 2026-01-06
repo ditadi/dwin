@@ -145,19 +145,6 @@ TEST(state_get_buffer_pids) {
   assert(count == 0);
 }
 
-TEST(state_set_z_order) {
-  WMState state;
-  wm_state_init(&state);
-
-  pid_t order[] = {1234, 5678, 9012};
-  wm_state_set_z_order(&state, 0, order, 3);
-
-  assert(state.buffers[0].z_order_count == 3);
-  assert(state.buffers[0].z_order[0] == 1234);
-  assert(state.buffers[0].z_order[1] == 5678);
-  assert(state.buffers[0].z_order[2] == 9012);
-}
-
 TEST(state_set_focused) {
   WMState state;
   wm_state_init(&state);
@@ -337,7 +324,7 @@ TEST(action_switch_buffer) {
   // should hide app 1234, 5678
   assert(effects.to_hide_count == 2);
 
-  // should raise app 9012 (only app in buffer)
+  // should raise app 9012 (only app in buffer, uses fallback to first)
   assert(effects.to_raise_count == 1);
   assert(effects.to_raise[0] == 9012);
 
@@ -356,30 +343,6 @@ TEST(action_switch_buffer_same) {
   assert(!ok); // no-op, same buffer
 }
 
-TEST(action_switch_buffer_with_z_order) {
-  WMState state;
-  wm_state_init(&state);
-
-  wm_state_register_app(&state, 1234, "com.apple.Terminal");
-  wm_state_register_app(&state, 5678, "com.google.Chrome");
-  wm_state_assign_to_buffer(&state, 1234, 1);
-  wm_state_assign_to_buffer(&state, 5678, 1);
-
-  // set z-order, 5678 on top, 1234 below
-  pid_t order[] = {5678, 1234};
-  wm_state_set_z_order(&state, 1, order, 2);
-
-  state.active_buffer = 0;
-
-  WMEffects effects;
-  wm_action_switch_buffer(&state, 1, &effects);
-
-  // should raise in reverse order, 1234 first, then 5678
-  assert(effects.to_raise_count == 2);
-  assert(effects.to_raise[0] == 1234);
-  assert(effects.to_raise[1] == 5678);
-}
-
 TEST(action_switch_buffer_empty) {
   WMState state;
   wm_state_init(&state);
@@ -393,6 +356,27 @@ TEST(action_switch_buffer_empty) {
   assert(ok);
   assert(state.active_buffer == 1);
   assert(effects.to_raise_count == 0); // nothing to raise
+}
+
+TEST(action_switch_buffer_with_last_focused) {
+  WMState state;
+  wm_state_init(&state);
+
+  wm_state_register_app(&state, 1234, "com.apple.Terminal");
+  wm_state_register_app(&state, 5678, "com.google.Chrome");
+  wm_state_assign_to_buffer(&state, 1234, 1);
+  wm_state_assign_to_buffer(&state, 5678, 1);
+
+  // set last focused to 5678
+  state.buffers[1].last_focused_pid = 5678;
+  state.active_buffer = 0;
+
+  WMEffects effects;
+  wm_action_switch_buffer(&state, 1, &effects);
+
+  // should raise last_focused_pid (5678), not first app
+  assert(effects.to_raise_count == 1);
+  assert(effects.to_raise[0] == 5678);
 }
 
 TEST(action_process_move_buffer) {
@@ -432,46 +416,6 @@ TEST(action_process_move_buffer) {
 
   assert(effects.needs_layout);
   assert(effects.layout_buffer == 1);
-}
-
-TEST(action_process_move_buffer_with_zorder) {
-  WMState state;
-  wm_state_init(&state);
-
-  // 2 apps in buffer 1 with z-order saved
-  wm_state_register_app(&state, 1234, "com.apple.Terminal");
-  wm_state_register_app(&state, 5678, "com.google.Chrome");
-  wm_state_assign_to_buffer(&state, 1234, 1);
-  wm_state_assign_to_buffer(&state, 5678, 1);
-
-  pid_t order[] = {5678, 1234};
-  wm_state_set_z_order(&state, 1, order, 2);
-
-  // app to move: starts in buffer 0
-  wm_state_register_app(&state, 9012, "com.spotify.client");
-  wm_state_assign_to_buffer(&state, 9012, 0);
-  state.active_buffer = 0;
-
-  // move app 9012 to buffer 1
-  WMAction action = {
-      .type = WM_ACTION_MOVE_BUFFER, .target_pid = 9012, .target_buffer = 1};
-  WMEffects effects;
-  bool ok = wm_action_process(&state, &action, &effects);
-  assert(ok);
-  assert(state.active_buffer == 1);
-
-  // moved app must be in raise list
-  bool found = false;
-  for (int i = 0; i < effects.to_raise_count; i++) {
-    if (effects.to_raise[i] == 9012) {
-      found = true;
-      break;
-    }
-  }
-  assert(found);
-
-  // moved app should be raised last
-  assert(effects.to_raise[effects.to_raise_count - 1] == 9012);
 }
 
 TEST(action_process_switch) {
@@ -531,7 +475,6 @@ int main(void) {
   RUN_TEST(state_unregister_app);
   RUN_TEST(state_assign_to_buffer);
   RUN_TEST(state_get_buffer_pids);
-  RUN_TEST(state_set_z_order);
   RUN_TEST(state_set_focused);
   RUN_TEST(state_pid_map_collision);
   printf("\nConfig:\n");
@@ -545,10 +488,9 @@ int main(void) {
   printf("\nActions:\n");
   RUN_TEST(action_switch_buffer);
   RUN_TEST(action_switch_buffer_same);
-  RUN_TEST(action_switch_buffer_with_z_order);
   RUN_TEST(action_switch_buffer_empty);
+  RUN_TEST(action_switch_buffer_with_last_focused);
   RUN_TEST(action_process_move_buffer);
-  RUN_TEST(action_process_move_buffer_with_zorder);
   RUN_TEST(action_process_switch);
   RUN_TEST(action_process_passthrough);
   printf("\nLayout:\n");

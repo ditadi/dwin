@@ -221,31 +221,6 @@ int wm_state_get_buffer_pids(const WMState *state, int buffer_index,
   return count;
 }
 
-void wm_state_set_z_order(WMState *state, int buffer_index, const pid_t *pids,
-                          int count) {
-  // validate if buffer index is valid
-  if (buffer_index < 0 || buffer_index >= WM_MAX_BUFFERS)
-    return;
-
-  WMBuffer *buffer = &state->buffers[buffer_index];
-
-  // validate if pids is valid
-  if (count <= 0 || pids == NULL) {
-    buffer->z_order_count = 0;
-    return;
-  }
-
-  // copy pids to buffer z-order
-  int to_copy = count < WM_MAX_APPS ? count : WM_MAX_APPS;
-
-  // copy z_order
-  for (int i = 0; i < to_copy; i++) {
-    buffer->z_order[i] = pids[i];
-  }
-
-  buffer->z_order_count = to_copy;
-}
-
 void wm_state_set_focused(WMState *state, pid_t pid) {
   // find app buffer
   const WMApp *app = wm_state_find_app(state, pid);

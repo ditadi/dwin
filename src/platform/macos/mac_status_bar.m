@@ -47,7 +47,6 @@
 
 - (void)terminate:(id)sender {
   (void)sender;
-  NSLog(@"[dwin] Quit requested...");
   [NSApp terminate:nil];
 }
 
