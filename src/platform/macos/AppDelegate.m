@@ -185,6 +185,8 @@ static void register_running_apps(void) {
 
   // register running apps
   register_running_apps();
+  // switch to buffer 0 (this shows all apps in buffer 0)
+  mac_switch_buffer(&g_state, 0);
   // apply layout to active buffer
   apply_layout_to_active_buffer();
 
@@ -228,7 +230,6 @@ static void register_running_apps(void) {
 }
 
 - (void)handleAppActivated:(NSNotification *)notification {
-  // Import flag from mac_effects.m
   extern bool g_is_switching_buffer;
 
   NSRunningApplication *application =
@@ -238,38 +239,50 @@ static void register_running_apps(void) {
 
   pid_t pid = application.processIdentifier;
 
-  // ignore activations during buffer switch
+  // ignore during buffer switch
   if (g_is_switching_buffer)
     return;
+
+  // debounce activation to prevent multiple activations
+  static NSDate *lastActivation = nil;
+  static pid_t lastActivatedPid = 0;
+  NSDate *now = [NSDate date];
+  if (lastActivation && [now timeIntervalSinceDate:lastActivation] < 0.2)
+    return;
+
+  // duplicate filter, skip if same pid as last event
+  if (pid == lastActivatedPid && lastActivation &&
+      [now timeIntervalSinceDate:lastActivation] < 1.0)
+    return;
+
+  lastActivatedPid = pid;
 
   // find which buffer this app belongs to
   const WMApp *app = wm_state_find_app(&g_state, pid);
   if (app != NULL) {
     int app_buffer = app->buffer_index;
-
     if (app_buffer < 0 || app_buffer >= WM_MAX_BUFFERS)
       return;
 
-    // only update last_focused if app is in the active buffer
+    // only update last focused if app is in the active buffer
     if (app_buffer == g_state.active_buffer) {
       wm_state_set_focused(&g_state, pid);
     } else {
       // switch to app's buffer if user activated it from another buffer
+      lastActivation = now;
       mac_switch_buffer(&g_state, app_buffer);
     }
   } else {
-    // if app is not known, try to register it
+    // new app, register and assign to active buffer
     if (is_app_manageable(application)) {
       int idx = wm_state_register_app(
           &g_state, pid, [application.bundleIdentifier UTF8String]);
-
       if (idx >= 0) {
         wm_state_assign_to_buffer(&g_state, pid, g_state.active_buffer);
         wm_state_set_focused(&g_state, pid);
         apply_layout_to_active_buffer();
       }
     } else {
-      // app might not have window yet, retry
       [self retryRegisterApp:pid name:application.localizedName attempt:1];
     }
   }

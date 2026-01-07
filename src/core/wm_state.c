@@ -93,7 +93,7 @@ static void pid_map_remove(WMPidMapEntry *map, pid_t pid) {
 
 void wm_state_init(WMState *state) {
   memset(state, 0, sizeof(WMState));
-  state->active_buffer = 0;
+  state->active_buffer = -1; // -1 means no buffer active yet (startup state)
   state->is_passthrough_mode = false;
 
   // initialize app registry

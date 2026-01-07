@@ -1,22 +1,92 @@
 #include "mac_effects.h"
+#include "wm_layout.h"
+#include "wm_runtime.h"
 #include "wm_state.h"
 #include <AppKit/AppKit.h>
 
+// flag to prevent race conditions during buffer switch
 bool g_is_switching_buffer = false;
 
 // cleanup timer to hide apps
 static dispatch_source_t g_cleanup_timer = NULL;
 static WMState *g_cleanup_state = NULL;
 
+#pragma mark - private functions
+
+// get the app for a given pid
 static NSRunningApplication *app_for_pid(pid_t pid) {
   return [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
 }
 
+// check if an app should be raised
+static bool should_raise_app(NSRunningApplication *app, pid_t focused_pid) {
+  if (!app)
+    return false;
+
+  pid_t pid = app.processIdentifier;
+  return (pid == focused_pid) || app.isHidden;
+}
+
+// find the app to focus in a buffer
+static pid_t find_app_to_focus(WMState *state, int buffer_index,
+                               pid_t *buffer_pids, int buffer_count) {
+  if (!state || buffer_index < 0 || buffer_index >= WM_MAX_BUFFERS ||
+      !buffer_pids || buffer_count <= 0)
+    return 0;
+
+  WMBuffer *buffer = &state->buffers[buffer_index];
+
+  // try last focused app (if in buffer)
+  if (buffer->last_focused_pid > 0) {
+    for (int i = 0; i < buffer_count; i++) {
+      if (buffer_pids[i] == buffer->last_focused_pid) {
+        return buffer->last_focused_pid;
+      }
+    }
+  }
+
+  // fallback to first app in buffer
+  if (buffer_count > 0)
+    return buffer_pids[0];
+
+  // empty buffer -> no focus target
+  return 0;
+}
+
+// reorder apps so focused app is LAST
+static int reorder_apps_for_raise(pid_t *input_pids, int count,
+                                  pid_t focused_pid, pid_t *output_pids) {
+  int output_count = 0;
+
+  // add all non-focused apps first
+  for (int i = 0; i < count; i++) {
+    if (input_pids[i] != focused_pid) {
+      output_pids[output_count++] = input_pids[i];
+    }
+  }
+
+  // add focused app last
+  if (focused_pid > 0)
+    output_pids[output_count++] = focused_pid;
+
+  return output_count;
+}
+
+#pragma mark - atomic operations
+
+// raise an app by pid, unhiding and unminimizing if needed
 static void raise_app(pid_t pid) {
+  NSRunningApplication *nsapp = app_for_pid(pid);
+
+  // unhide app if needed
+  if (nsapp) {
+    if (nsapp.isHidden) {
+      [nsapp unhide];
+    }
+  }
+
   AXUIElementRef ax_app = AXUIElementCreateApplication(pid);
   if (ax_app == NULL) {
-    NSRunningApplication *app = app_for_pid(pid);
-    [app unhide];
     return;
   }
 
@@ -26,17 +96,26 @@ static void raise_app(pid_t pid) {
                                               (CFTypeRef *)&main_window);
 
   if (err == kAXErrorSuccess && main_window != NULL) {
+    // check if window is minimized and unminimize it
+    CFBooleanRef minimized = NULL;
+    AXUIElementCopyAttributeValue(main_window, kAXMinimizedAttribute,
+                                  (CFTypeRef *)&minimized);
+    if (minimized == kCFBooleanTrue) {
+      AXUIElementSetAttributeValue(main_window, kAXMinimizedAttribute,
+                                   kCFBooleanFalse);
+      if (minimized)
+        CFRelease(minimized);
+    }
+
+    // raise the window
     AXUIElementPerformAction(main_window, kAXRaiseAction);
     CFRelease(main_window);
-  } else {
-    // no main window, just unhide
-    NSRunningApplication *app = app_for_pid(pid);
-    [app unhide];
   }
 
   CFRelease(ax_app);
 }
 
+// activate an app by pid
 static void activate_app(pid_t pid) {
   NSRunningApplication *app = app_for_pid(pid);
   if (app) {
@@ -44,6 +123,7 @@ static void activate_app(pid_t pid) {
   }
 }
 
+// hide an app by pid
 static void hide_app(pid_t pid) {
   NSRunningApplication *app = app_for_pid(pid);
   if (app) {
@@ -51,7 +131,63 @@ static void hide_app(pid_t pid) {
   }
 }
 
-// hide all apps not in current buffer
+#pragma mark - buffer switch phases
+static pid_t show_buffer_apps(WMState *state, int buffer_index,
+                              pid_t *buffer_pids, int buffer_count) {
+
+  if (buffer_count == 0) {
+    // empty buffer -> don't activate anything (leave it empty)
+    return 0;
+  }
+
+  // find app to focus
+  pid_t focused_pid =
+      find_app_to_focus(state, buffer_index, buffer_pids, buffer_count);
+
+  // reorder apps so focused app is LAST
+  pid_t ordered_pids[WM_MAX_APPS];
+  int ordered_count = reorder_apps_for_raise(buffer_pids, buffer_count,
+                                             focused_pid, ordered_pids);
+
+  // raise apps that need it
+  for (int i = 0; i < ordered_count; i++) {
+    pid_t pid = ordered_pids[i];
+    NSRunningApplication *app = app_for_pid(pid);
+    if (should_raise_app(app, focused_pid)) {
+      raise_app(pid);
+    }
+  }
+
+  // activate focused app last
+  if (focused_pid > 0) {
+    activate_app(focused_pid);
+  }
+
+  return focused_pid;
+}
+
+static void hide_buffer_apps(WMState *state, int old_buffer_index,
+                             int new_buffer_index) {
+  // startup state, no old buffer
+  if (old_buffer_index < 0 || old_buffer_index >= WM_MAX_BUFFERS)
+    return;
+
+  pid_t old_pids[WM_MAX_APPS];
+  int old_count =
+      wm_state_get_buffer_pids(state, old_buffer_index, old_pids, WM_MAX_APPS);
+
+  for (int i = 0; i < old_count; i++) {
+    pid_t pid = old_pids[i];
+    const WMApp *app = wm_state_find_app(state, pid);
+
+    // hide if app is no longer in the new buffer
+    if (!app || app->buffer_index != new_buffer_index) {
+      hide_app(pid);
+    }
+  }
+}
+
+// hide apps not in current buffer
 static void hide_apps_not_in_current_buffer(WMState *state) {
   for (int i = 0; i < state->app_registry.app_count; i++) {
     WMApp *wm_app = &state->app_registry.apps[i];
@@ -68,9 +204,8 @@ static void hide_apps_not_in_current_buffer(WMState *state) {
 }
 
 static void cleanup_handler(void) {
-  if (g_cleanup_state) {
+  if (g_cleanup_state)
     hide_apps_not_in_current_buffer(g_cleanup_state);
-  }
   g_cleanup_timer = NULL;
 }
 
@@ -90,136 +225,88 @@ static void schedule_cleanup(WMState *state) {
       g_cleanup_timer,
       dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)),
       DISPATCH_TIME_FOREVER, 0);
+
   dispatch_source_set_event_handler(g_cleanup_timer, ^{
     cleanup_handler();
   });
   dispatch_resume(g_cleanup_timer);
 }
 
+#pragma mark - public api
+
 void mac_switch_buffer(WMState *state, int new_buffer_index) {
+  // validate input
   if (new_buffer_index < 0 || new_buffer_index >= WM_MAX_BUFFERS)
     return;
 
   int old_buffer_index = state->active_buffer;
   if (old_buffer_index == new_buffer_index)
-    return;
+    return; // no-op if same buffer
 
+  // set flag to block focus tracking
   g_is_switching_buffer = true;
 
+  // update state first
   state->active_buffer = new_buffer_index;
-
-  WMBuffer *new_buffer = &state->buffers[new_buffer_index];
 
   // get pids from new buffer
   pid_t new_pids[WM_MAX_APPS];
   int new_count =
       wm_state_get_buffer_pids(state, new_buffer_index, new_pids, WM_MAX_APPS);
 
-  // get pids from old buffer
-  pid_t old_pids[WM_MAX_APPS];
-  int old_count =
-      wm_state_get_buffer_pids(state, old_buffer_index, old_pids, WM_MAX_APPS);
+  // show new buffer apps (raise and activate)
+  show_buffer_apps(state, new_buffer_index, new_pids, new_count);
 
-  // hide apps from old buffer
-  for (int i = 0; i < old_count; i++) {
-    pid_t pid = old_pids[i];
-    const WMApp *app = wm_state_find_app(state, pid);
-    if (!app || app->buffer_index != new_buffer_index) {
-      hide_app(pid);
-    }
-  }
-
-  pid_t focused_pid = 0;
-  if (new_buffer->last_focused_pid > 0) {
-    // check if last-focused app is in new buffer
-    for (int i = 0; i < new_count; i++) {
-      if (new_pids[i] == new_buffer->last_focused_pid) {
-        focused_pid = new_buffer->last_focused_pid;
-        break;
-      }
-    }
-  }
-  if (focused_pid == 0 && new_count > 0) {
-    // fallback to first app
-    focused_pid = new_pids[0];
-  }
-
-  // raise all apps in correct order (focused first, then background)
-  pid_t ordered_pids[WM_MAX_APPS];
-  int ordered_count = 0;
-
-  // add focused app first
-  if (focused_pid > 0) {
-    ordered_pids[ordered_count++] = focused_pid;
-  }
-
-  // add non-focused apps after
-  for (int i = 0; i < new_count; i++) {
-    if (new_pids[i] != focused_pid) {
-      ordered_pids[ordered_count++] = new_pids[i];
-    }
-  }
-
-  // build list of pids that need raising
-  pid_t raise_pids[WM_MAX_APPS];
-  int raise_count = 0;
-  int focused_raise_index = -1;
-
-  for (int i = 0; i < ordered_count; i++) {
-    pid_t pid = ordered_pids[i];
-    NSRunningApplication *app = app_for_pid(pid);
-    bool is_focused = (pid == focused_pid);
-    bool is_hidden = (app && app.isHidden);
-
-    // raise if focused or hidden
-    if (is_focused || is_hidden) {
-      if (is_focused)
-        focused_raise_index = raise_count;
-      raise_pids[raise_count++] = pid;
-    }
-  }
-
-  // raise apps
-  for (int i = 0; i < raise_count; i++) {
-    pid_t pid = raise_pids[i];
-    bool should_activate = (i == focused_raise_index);
-
-    if (should_activate) {
-      activate_app(pid);
-    }
-    raise_app(pid);
-  }
-
-  if (new_count == 0) {
-    // activate finder if buffer is empty
-    NSArray *apps = [NSRunningApplication
-        runningApplicationsWithBundleIdentifier:@"com.apple.finder"];
-    if (apps.count > 0) {
-      [apps[0] activateWithOptions:0];
-    }
-  }
+  // hide old buffer aps
+  hide_buffer_apps(state, old_buffer_index, new_buffer_index);
 
   // schedule cleanup
   schedule_cleanup(state);
 
-  // clear flag
-  int clear_delay_ms = (raise_count > 0) ? (raise_count * 50 + 50) : 50;
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
-                               (int64_t)(clear_delay_ms * NSEC_PER_MSEC)),
-                 dispatch_get_main_queue(), ^{
-                   g_is_switching_buffer = false;
-                 });
+  // remember which app should have focus
+  pid_t final_focused_pid = 0;
+  if (new_count > 0) {
+    WMBuffer *new_buffer = &state->buffers[new_buffer_index];
+    if (new_buffer->last_focused_pid > 0) {
+      for (int i = 0; i < new_count; i++) {
+        if (new_pids[i] == new_buffer->last_focused_pid) {
+          final_focused_pid = new_buffer->last_focused_pid;
+          break;
+        }
+      }
+    }
+    if (final_focused_pid == 0 && new_count > 0) {
+      final_focused_pid = new_pids[0];
+    }
+  }
+
+  // clear flag after delay, then re-activate focused app
+  int clear_delay_ms = (new_count > 0) ? (new_count * 50 + 50) : 50;
+  dispatch_after(
+      dispatch_time(DISPATCH_TIME_NOW,
+                    (int64_t)(clear_delay_ms * NSEC_PER_MSEC)),
+      dispatch_get_main_queue(), ^{
+        g_is_switching_buffer = false;
+
+        // re-activate focused app to override any finder activation
+        if (final_focused_pid > 0) {
+          NSRunningApplication *refocus_app = [NSRunningApplication
+              runningApplicationWithProcessIdentifier:final_focused_pid];
+          if (refocus_app) {
+            [refocus_app activateWithOptions:NSApplicationActivateAllWindows];
+          }
+        }
+      });
 }
 
 WMRect mac_effects_get_visible_screen_rect(void) {
   NSScreen *screen = [NSScreen mainScreen];
   NSRect frame = [screen frame];
-  return (WMRect){
-      .x = frame.origin.x,
-      .y = frame.origin.y,
-      .width = frame.size.width,
-      .height = frame.size.height,
-  };
+
+  return (WMRect){.x = frame.origin.x,
+                  .y = frame.origin.y,
+                  .width = frame.size.width,
+                  .height = frame.size.height};
 }
 
 bool mac_effects_apply_frame(pid_t pid, WMRect frame) {
@@ -248,6 +335,7 @@ bool mac_effects_apply_frame(pid_t pid, WMRect frame) {
     window = (AXUIElementRef)CFRetain(CFArrayGetValueAtIndex(windows, 0));
     CFRelease(windows);
   }
+
   // set position
   CGPoint position = CGPointMake(frame.x, frame.y);
   AXValueRef position_value = AXValueCreate(kAXValueTypeCGPoint, &position);
@@ -261,6 +349,7 @@ bool mac_effects_apply_frame(pid_t pid, WMRect frame) {
   CFRelease(size_value);
   CFRelease(window);
   CFRelease(app);
+
   return true;
 }
 
